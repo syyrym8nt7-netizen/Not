@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>작별하지 않는다 - 확통 미로 게임</title>
+    <style>
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
+        body { margin: 0; padding: 0; background-color: #0d0d0d; color: #e0e0e0; font-family: 'Apple SD Gothic Neo', sans-serif; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; height: -webkit-fill-available; }
+        
+        #game-container { width: 100vw; height: 100vh; height: -webkit-fill-available; max-width: 450px; background-color: #0d0d0d; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* UI 상단 바 */
+        #ui-layer { padding: 15px; display: flex; justify-content: space-between; background: rgba(0,0,0,0.8); border-bottom: 1px solid #222; font-size: 13px; z-index: 10; padding-top: calc(15px + env(safe-area-inset-top)); }
+        .stat-bar { display: flex; align-items: center; gap: 6px; }
+        .bar-bg { width: 70px; height: 8px; background: #222; border-radius: 4px; overflow: hidden; border: 1px solid #444; }
+        .bar-fill { height: 100%; width: 100%; transition: width 0.2s; }
+        #hp-fill { background: #aaaaaa; }
+        #ama-fill { background: #b0c4de; }
+
+        /* 중앙 뷰포트 */
+        #display-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 15px; min-height: 0; }
+        canvas { background: #141414; border: 1px solid #292929; width: 100%; max-width: 380px; height: auto; aspect-ratio: 4 / 3; image-rendering: pixelated; }
+        #narrative-box { width: 100%; max-width: 380px; padding: 12px; background: rgba(20,20,20,0.9); border: 1px solid #262626; border-radius: 6px; font-size: 13px; line-height: 1.6; min-height: 100px; margin-top: 12px; color: #b3b3b3; overflow-y: auto; }
+
+        /* 수학 시스템 오버레이 */
+        #quiz-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10,10,10,0.95); display: none; flex-direction: column; justify-content: center; padding: 30px; z-index: 20; }
+        #quiz-text { font-size: 14px; line-height: 1.7; margin-bottom: 25px; color: #d4d4d4; white-space: pre-line; }
+        .quiz-btn { background: #1a1a1a; border: 1px solid #3a3a3a; color: #fff; padding: 14px; margin: 8px 0; border-radius: 6px; font-size: 14px; text-align: left; line-height: 1.4; }
+        .quiz-btn:active { background: #333; }
+
+        /* 아이폰 터치 최적화 가상 패드 */
+        #control-pad { height: 180px; background: #111; display: grid; grid-template-areas: ". up ." "left . right" ". down ."; grid-template-columns: 1fr 1.2fr 1fr; grid-template-rows: 1fr 1fr 1fr; padding: 12px; gap: 10px; border-top: 1px solid #222; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+        .ctrl-btn { background: #1c1c1e; border: 1px solid #2c2c2e; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #d1d1d6; font-size: 22px; font-weight: bold; }
+        .ctrl-btn:active { background: #3a3a3c; color: #fff; }
+        #btn-up { grid-area: up; } #btn-left { grid-area: left; } #btn-right { grid-area: right; } #btn-down { grid-area: down; }
+
+        /* 결과 연출 스크롤 레이어 */
+        #scroller { display: none; position: absolute; width: 100%; height: 100%; background: #050505; top: 0; left: 0; z-index: 30; padding: 50px 25px; text-align: center; overflow-y: auto; }
+        #scroller-text { font-size: 14px; line-height: 2.1; color: #cccccc; white-space: pre-line; text-align: left; }
+        .retry-btn { margin-top: 35px; background: #262626; color: #fff; border: 1px solid #444; padding: 12px 24px; border-radius: 6px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-layer">
+        <div class="stat-bar">
+            <span>경하 체온</span>
+            <div class="bar-bg"><div id="hp-fill" class="bar-fill"></div></div>
+        </div>
+        <div class="stat-bar" id="ama-ui" style="visibility: hidden;">
+            <span>아마 체온</span>
+            <div class="bar-bg"><div id="ama-fill" class="bar-fill"></div></div>
+        </div>
+    </div>
+
+    <div id="display-area">
+        <canvas id="gameCanvas" width="400" height="300"></canvas>
+        <div id="narrative-box">하단 화살표 패드를 터치해 움직이세요. 눈보라 치는 미로의 벽(어두운 타일)을 피해 출구(밝은 사각형)로 나아가야 합니다.</div>
+    </div>
+
+    <div id="quiz-overlay">
+        <div id="quiz-text"></div>
+        <div id="quiz-options"></div>
+    </div>
+
+    <div id="control-pad">
+        <div class="ctrl-btn" id="btn-up">▲</div>
+        <div class="ctrl-btn" id="btn-left">◀</div>
+        <div class="ctrl-btn" id="btn-right">▶</div>
+        <div class="ctrl-btn" id="btn-down">▼</div>
+    </div>
+
+    <div id="scroller">
+        <div id="scroller-text"></div>
+        <button class="retry-btn" onclick="location.reload()">다시 기억하기</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let hp = 100;
+    let amaTemp = 100;
+    let currentStage = 1;
+    let itemCollected = 0;
+    let isFrozen = false;
+
+    let player = { x: 30, y: 30, size: 14 };
+
+    const maze1 = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,1,0,0,0,0,0,1,0,0,0,1],
+        [1,0,1,0,1,0,1,1,1,0,1,0,1,0,1],
+        [1,0,1,0,0,0,1,0,0,0,0,0,1,0,1],
+        [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,0,0,0,0,0,1,0,1,0,0,0,1,0,1],
+        [1,1,1,1,1,0,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,1,0,0,0,1],
+        [1,0,1,0,1,1,1,1,1,0,1,1,1,1,1],
+        [1,0,1,0,0,0,0,0,0,0,0,0,0,2,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    const maze2 = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,1,1,1,1,1,1,1,1,1,1,1,0,1],
+        [1,0,1,0,0,0,0,0,0,0,0,0,1,0,1],
+        [1,0,1,0,1,1,1,1,1,1,1,0,1,0,1],
+        [1,0,0,0,1,3,0,0,0,0,1,0,0,0,1],
+        [1,0,1,0,1,1,1,1,1,1,1,0,1,0,1],
+        [1,0,1,0,0,0,0,0,0,0,0,0,1,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    const maze3 = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,1,0,0,0,4,0,1,0,0,0,1],
+        [1,0,1,0,1,0,1,1,1,0,1,0,1,0,1],
+        [1,4,1,0,0,0,1,0,0,0,0,0,1,4,1],
+        [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,0,0,0,0,0,1,0,1,0,0,0,1,0,1],
+        [1,1,1,1,1,0,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,1,0,0,0,1],
+        [1,0,1,0,1,1,1,1,1,0,1,1,1,1,1],
+        [1,0,1,0,0,0,0,0,0,0,0,0,0,5,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    let currentMaze = maze1;
+    const tileSize = 26;
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        for(let r=0; r<currentMaze.length; r++){
+            for(let c=0; c<currentMaze[r].length; c++){
+                if(currentMaze[r][c] === 1) {
+                    ctx.fillStyle = currentStage === 3 ? '#1c1c1c' : '#2c2c2c';
+                    ctx.fillRect(c*tileSize, r*tileSize, tileSize-1, tileSize-1);
+                } else if(currentMaze[r][c] === 2 || currentMaze[r][c] === 3 || currentMaze[r][c] === 5) {
+                    ctx.fillStyle = '#555555';
+                    ctx.fillRect(c*tileSize, r*tileSize, tileSize-1, tileSize-1);
+                } else if(currentMaze[r][c] === 4) {
+                    ctx.fillStyle = '#a1a1a1';
+                    ctx.beginPath();
+                    ctx.arc(c*tileSize + tileSize/2, r*tileSize + tileSize/2, 5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        if(currentStage === 2) {
+            ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+            for(let i=0; i<15; i++) {
+                ctx.fillRect(Math.random()*canvas.width, Math.random()*canvas.height, 2, 2);
+            }
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(player.x, player.y, player.size, player.size);
+    }
+
+    function updateUI() {
+        document.getElementById('hp-fill').style.width = Math.max(0, hp) + '%';
+        document.getElementById('ama-fill').style.width = Math.max(0, amaTemp) + '%';
+        if(hp <= 0 || (currentStage === 2 && amaTemp <= 0)) {
+            triggerEnding('bad');
+        }
+    }
+
+    function move(dx, dy) {
+        if(isFrozen) return;
+
+        let nextX = player.x + dx;
+        let nextY = player.y + dy;
+
+        if(currentStage === 2) {
+            amaTemp -= 4;
+            updateUI();
+            if(hp <= 0 || amaTemp <= 0) return;
+            
+            if(Math.random() < 0.5) {
+                document.getElementById('narrative-box').innerText = "❄️ [독립시행 실패] 순간 강한 바람이 몰아쳐 앞으로 한 발자국도 나아가지 못했습니다. 아마의 온기가 떨어집니다.";
+                draw();
+                return; 
+            } else {
+                document.getElementById('narrative-box').innerText = "🌲 [독립시행 성공] 바람을 뚫고 한 걸음 전진하는 데 성공했습니다.";
+            }
+        }
+
+        let leftTile = Math.floor(nextX / tileSize);
+        let rightTile = Math.floor((nextX + player.size) / tileSize);
+        let topTile = Math.floor(nextY / tileSize);
+        let bottomTile = Math.floor((nextY + player.size) / tileSize);
+
+        if(currentMaze[topTile][leftTile] === 1 || currentMaze[topTile][rightTile] === 1 ||
+           currentMaze[bottomTile][leftTile] === 1 || currentMaze[bottomTile][rightTile] === 1) {
+            return;
+        }
+
+        player.x = nextX;
+        player.y = nextY;
+
+        let centerTileX = Math.floor((player.x + player.size/2) / tileSize);
+        let centerTileY = Math.floor((player.y + player.size/2) / tileSize);
+        let tileValue = currentMaze[centerTileY][centerTileX];
+
+        if(tileValue === 2) {
+            triggerQuiz(1);
+        } else if(tileValue === 3) {
+            currentStage = 3;
+            currentMaze = maze3;
+            player.x = 30; player.y = 30;
+            document.getElementById('ama-ui').style.visibility = 'hidden';
+            document.getElementById('narrative-box').innerText = "3단계: 정심의 방. 흩어진 수형인 명부 조각 3개를 모두 찾은 후 출구로 향하십시오.";
+        } else if(tileValue === 4) {
+            itemCollected++;
+            currentMaze[centerTileY][centerTileX] = 0;
+            document.getElementById('narrative-box').innerText = `명부 조각을 발견했습니다. (${itemCollected} / 3)`;
+        } else if(tileValue === 5) {
+            if(itemCollected >= 3) {
+                triggerQuiz(3);
+            } else {
+                document.getElementById('narrative-box').innerText = "아직 흩어진 명부 조각들을 전부 찾지 못했습니다.";
+            }
+        }
+        draw();
+    }
+
+    function triggerQuiz(stage) {
+        isFrozen = true;
+        const overlay = document.getElementById('quiz-overlay');
+        const qText = document.getElementById('quiz-text');
+        const qOptions = document.getElementById('quiz-options');
+        qOptions.innerHTML = '';
+        overlay.style.display = 'flex';
+
+        if(stage === 1) {
+            qText.innerText = "🚨 [수학 요소: 조건부 확률]\n\n과거 토벌대를 피해 한라산 구역(A)으로 도망친 주민의 생존율은 80%, 해안가 마을(B)에 남은 주민의 생존율은 20%였다. 당시 수집된 유품 중 70%는 한라산 구역의 것이었다. 지금 내 발밑에서 발견된 낡은 유품이 한라산 구역의 것일 조건 하에서, 실제 주민들이 생존했을 확률이 더 높은 '안전한 탈출 경로'는 어디인가?";
+            
+            let btnA = document.createElement('button');
+            btnA.className = 'quiz-btn'; btnA.innerText = "경로 A (한라산 구역으로 향하는 길)";
+            btnA.onclick = () => {
+                overlay.style.display = 'none'; isFrozen = false; currentStage = 2; currentMaze = maze2;
+                player.x = 30; player.y = 30;
+                document.getElementById('ama-ui').style.visibility = 'visible';
+                document.getElementById('narrative-box').innerText = "2단계: 마당 창고로 가야 합니다. 한 번 움직일 때마다 50%의 독립시행 확률을 뚫어야 전진할 수 있으며 아마의 체온이 깎입니다.";
+                draw();
+            };
+            
+            let btnB = document.createElement('button');
+            btnB.className = 'quiz-btn'; btnB.innerText = "경로 B (해안가 마을로 회항하는 길)";
+            btnB.onclick = () => {
+                hp -= 35; updateUI(); overlay.style.display = 'none'; isFrozen = false;
+                player.x = 30; player.y = 30;
+                document.getElementById('narrative-box').innerText = "오답입니다! 눈더미에 막혀 경하의 체온(HP)이 35 깎였습니다. 처음부터 다시 길을 헤매야 합니다.";
+                draw();
+            };
+            qOptions.appendChild(btnA); qOptions.appendChild(btnB);
+        } 
+        else if(stage === 3) {
+            qText.innerText = "🚨 [수학 요소: 통계적 추정]\n\n수집한 수형인 명부 중 무작위로 추출한 100명(표본)을 조사했더니 행방불명자가 총 30명(표본비율=0.3)이었다. 이를 바탕으로 전체 명부 내 행방불명자의 실제 비율을 신뢰도 95%로 추정할 때, 올바른 '신뢰구간' 범위의 문을 선택하시오. (단, 신뢰구간 상수는 계산 편의상 2로 조율함)";
+            
+            let choices = [
+                { txt: "문 1: [ 0.10 ≤ p ≤ 0.20 ]", correct: false },
+                { txt: "문 2: [ 0.21 ≤ p ≤ 0.39 ]", correct: true },
+                { txt: "문 3: [ 0.40 ≤ p ≤ 0.60 ]", correct: false }
+            ];
+
+            choices.forEach(c => {
+                let btn = document.createElement('button');
+                btn.className = 'quiz-btn'; btn.innerText = c.txt;
+                btn.onclick = () => {
+                    overlay.style.display = 'none'; isFrozen = false;
+                    if(c.correct) {
+                        if(hp >= 90) triggerEnding('hidden');
+                        else triggerEnding('normal');
+                    } else {
+                        hp -= 50; updateUI();
+                        player.x = 30; player.y = 30;
+                        if(hp > 0) {
+                            document.getElementById('narrative-box').innerText = "오답입니다! 대답 없는 이름들의 벽에 부딪혀 체온(HP)이 50 깎였습니다.";
+                            draw();
+                        }
+                    }
+                };
+                qOptions.appendChild(btn);
+            });
+        }
+    }
+
+    function triggerEnding(type) {
+        isFrozen = true;
+        const scroller = document.getElementById('scroller');
+        const sText = document.getElementById('scroller-text');
+        scroller.style.display = 'block';
+
+        if(type === 'hidden') {
+            sText.innerText = `🌟 [히든 엔딩: 작별하지 않는다]\n\n장작불의 온기 속에서 흰 앵무새 아마는 완전히 기운을 차려 조용히 숨을 쉬며 당신의 어깨 위에 내려앉았다.\n\n수만 개의 가혹한 확률과 위기를 완벽히 이겨내고 정심 어머니가 평생 놓지 않았던 기록의 실마리를 온전하게 지켜냈다.\n\n공방의 문이 열리고 병원에 있어야 할 인선이 눈을 맞으며 걸어 들어와 우리를 꼭 안아준다. 우리가 완벽하게 기억해 낸 이름들 덕분에, 이곳의 겨울은 더는 시리지 않다. \n\n기억하는 한 우리는 결코 작별하지 않는다.`;
+        } else if(type === 'normal') {
+            sText.innerText = `🌗 [노멀 엔딩: 겨울의 끝방]\n\n몇 번의 시련과 한계가 있었지만 땔감을 구해 장작불을 지피는 데 성공했다.\n\n아마는 여전히 웅크린 채 조용히 숨을 몰아쉬고 있고, 인선은 아직 도착하지 않았다. 하지만 당신은 정심 어머니의 옛 명부 조각들을 품에 소중히 안고, 방 한구석에 앉아 고요히 새벽이 오기를 기다린다.\n\n상처 입고 지쳤을지라도, 우리가 이 방의 온기를 끝내 버텨내고 지켜내는 한 진실은 결코 사라지지 않을 것이다.`;
+        } else {
+            sText.innerText = `❄️ [배드 엔딩: 정전 (Blackout)]\n\n눈이 너무 깊어 더는 발이 떨어지지 않는다.\n\n사방을 둘러보아도 빛은 없고 오직 시린 바람 소리뿐이다. 공방의 아마도, 병원의 인선도, 정심 어머니가 수십 년간 모아온 기억들도... \n\n모두 이 가혹한 제주의 하얀 눈보라 속으로 서서히 파묻혀 암전되어 간다.`;
+        }
+    }
+
+    // 아이폰 반응속도 최적화를 위한 핑거 터치 이벤트 바인딩
+    const step = 10;
+    function bindTouch(id, dx, dy) {
+        const btn = document.getElementById(id);
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            move(dx, dy);
+        }, { passive: false });
+    }
+
+    bindTouch('btn-up', 0, -step);
+    bindTouch('btn-down', 0, step);
+    bindTouch('btn-left', -step, 0);
+    bindTouch('btn-right', step, 0);
+
+    window.addEventListener('keydown', (e) => {
+        if(e.key === 'ArrowUp') move(0, -step);
+        if(e.key === 'ArrowDown') move(0, step);
+        if(e.key === 'ArrowLeft') move(-step, 0);
+        if(e.key === 'ArrowRight') move(step, 0);
+    });
+
+    // 스크롤 튕김 방지 패치
+    document.addEventListener('touchmove', (e) => { if(e.scale !== 1) e.preventDefault(); }, { passive: false });
+
+    updateUI();
+    draw();
+</script>
+</body>
+</html>
